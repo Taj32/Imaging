@@ -2,37 +2,94 @@ from src.data_preprocessing.load_data import load_dataset
 from src.data_preprocessing.preprocess import preprocess_dataset
 import matplotlib.pyplot as plt
 import numpy as np
+import sys
+import os
+import deeplake
+
+# Define the path to save the DeepLake dataset
+dataset_path = "my_xray_dataset"
 
 if __name__ == "__main__":  # ✅ Prevents multiprocessing error on Windows
-    # Load dataset
-    dataloader = load_dataset(batch_size=5)
+    # Load dataset with batch size 32 and shuffle
+    dataloader = load_dataset(batch_size=32)
 
-    # Get the first batch (first sample)
-    print("here first")
-    first_batch = next(iter(dataloader))  # Extract one batch
-    print(first_batch.keys())  # Confirm keys exist
-    print(type(first_batch["images"]))  # Check image data type after transformation
+    # Check if the DeepLake dataset exists
+    if os.path.exists(dataset_path):
+        # Delete the existing dataset to create a new one
+        deeplake.delete(dataset_path)
+        print("Existing DeepLake dataset deleted.")
 
-    
-    print("here....")
+    # Limit the number of batches to process
+    max_batches = 5  # Adjust this number to process more or fewer batches
+    processed_data = []
 
-    # Extract image and patient age
-    image = first_batch["images"][0].numpy().transpose(1, 2, 0)  # Convert tensor to NumPy array and transpose to (H, W, C)
-    patient_age = first_batch["metadata/patient_age"][0].item()  # Convert tensor to scalar
+    # Iterate over the items in the DataLoader
+    for i, batch in enumerate(dataloader):
+        if i >= max_batches:
+            break
 
-    # Display the image
-    plt.imshow(image, cmap="gray")  # X-rays are grayscale
-    plt.title(f"Patient Age: {patient_age}")
-    plt.axis("off")
-    plt.show()
+        print(f"Batch {i}:")
+        print(f"Image shape: {batch['images'].shape}")
+        print(f"Findings shape: {batch['findings'].shape}")
+        print(f"Bounding boxes shape: {batch['boxes/bbox'].shape}")
+        print(f"Bounding box findings shape: {batch['boxes/finding'].shape}")
+        for field in batch.keys():
+            if field.startswith("metadata"):
+                print(f"{field} shape: {batch[field].shape}")
 
-    print("temp end 1")
-    quit()
- 
-    # Preprocess dataset
-    processed_data = preprocess_dataset(dataloader)
+        # Check for discrepancies in image shapes
+        if batch['images'].shape != (32, 3, 224, 224):
+            print(f"Discrepancy found in batch {i} with image shape: {batch['images'].shape}")
+            break
 
-    print("temp end")
-    quit()
+        processed_data.extend(preprocess_dataset([batch]))
+
+    print("Finished iterating over the DataLoader.")
+
     # Print sample output
-    print("Processed Data Sample:", processed_data[0])
+    if processed_data:
+        print("Processed Data Sample:", processed_data[0])
+    else:
+        print("No processed data found.")
+
+    # Create a new DeepLake dataset
+    ds = deeplake.empty(dataset_path)
+    
+    # Define the schema for the dataset
+    ds.create_tensor("images", htype="image", dtype="float32", sample_compression="jpeg")
+    ds.create_tensor("findings", htype="generic", dtype="int64")
+    ds.create_tensor("boxes/bbox", htype="bbox", dtype="float32")
+    ds.create_tensor("boxes/finding", htype="generic", dtype="int64")
+    
+    # Add metadata fields
+    metadata_fields = [
+        "metadata/patient_id", "metadata/patient_age", "metadata/patient_gender",
+        "metadata/follow_up_num", "metadata/view_position",
+        "metadata/orig_img_w", "metadata/orig_img_h",
+        "metadata/orig_img_pix_spacing_x", "metadata/orig_img_pix_spacing_y"
+    ]
+    for field in metadata_fields:
+        ds.create_tensor(field, htype="generic", dtype="int64")
+    
+    # Save the processed data to the DeepLake dataset
+    for item in processed_data:
+        item_dict = {
+            "images": item["images"],
+            "findings": item["findings"],
+            "boxes/bbox": item["boxes/bbox"],
+            "boxes/finding": item["boxes/finding"],
+            **{field: item[field] for field in metadata_fields}
+        }
+        ds.append(item_dict)
+    
+    print("Processed data saved to DeepLake dataset")
+
+    # Print sample output
+    if len(ds) > 0:
+        print("Processed Data Sample:", ds[0])
+    else:
+        print("No data found in the DeepLake dataset.")
+
+    # Now you can proceed with training the model using the processed data
+    # Example code for training the model
+    # ...

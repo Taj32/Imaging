@@ -5,16 +5,13 @@ from torch.utils.data._utils.collate import default_collate
 import numpy as np
 import torch
 
-
 # Define a transformation to preprocess images
 transform = transforms.Compose([
+    transforms.Lambda(lambda img: img.convert("RGB")),  # Convert grayscale images to RGB
     transforms.Resize((224, 224)),  # Resize images to 224x224
     transforms.ToTensor(),  # Convert PIL images to tensors
-    transforms.Normalize(mean=[0.5], std=[0.5])  # Normalize to [-1, 1]
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize to [-1, 1]
 ])
-
-
-import torch
 
 def custom_collate_fn(batch):
     print("\n--- DEBUG: Original Batch Structure ---")
@@ -71,6 +68,12 @@ def custom_collate_fn(batch):
             pad_tensor = torch.zeros((max_boxes - bbox_tensor.shape[0], 4))
             batch_dict["boxes/bbox"][i] = torch.cat([bbox_tensor, pad_tensor], dim=0)
 
+        # Pad bounding box findings
+        bbox_finding_tensor = batch_dict["boxes/finding"][i]
+        if bbox_finding_tensor.shape[0] < max_boxes:
+            pad_tensor = torch.full((max_boxes - bbox_finding_tensor.shape[0],), -1, dtype=torch.long)  # Use -1 for padding
+            batch_dict["boxes/finding"][i] = torch.cat([bbox_finding_tensor, pad_tensor], dim=0)
+
     # Convert lists to tensors using `default_collate`
     for key in batch_dict:
         batch_dict[key] = default_collate(batch_dict[key])
@@ -79,7 +82,6 @@ def custom_collate_fn(batch):
     print(f"Final Batch Keys: {batch_dict.keys()}")
 
     return batch_dict
-
 
 def load_dataset(batch_size=32):
     """
